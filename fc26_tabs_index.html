@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="is">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>FC 26 Tabs Max‑Bid (Excel‑stíll)</title>
+  <style>
+    :root { --bg:#fff; --fg:#000; --muted:#555; --line:#000; }
+    html, body { background:var(--bg); color:var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Liberation Sans", sans-serif; }
+    *{ box-sizing: border-box; }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 8px 12px 92px; }
+    h1 { font-size:1.15rem; margin:6px 0; }
+    p.sub { color:var(--muted); margin:0 0 8px; font-size:.95rem; }
+
+    .tabs { position: sticky; top: 0; z-index: 10; background:#fff; padding:8px 0 6px; border-bottom:1px solid var(--line); }
+    .tabbar { display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; }
+    .tab { white-space:nowrap; border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:#fff; font-weight:800; cursor:pointer; }
+    .tab.active { background:#000; color:#fff; }
+    .tab small { opacity:.8; font-weight:600; }
+    .tabbtns { display:flex; gap:8px; margin-top:8px; }
+    .btn { border:1px solid var(--line); background:#fff; color:#000; padding:9px 12px; border-radius:10px; font-weight:800; }
+
+    .card { border:1px solid var(--line); border-radius:14px; padding:12px; margin:12px 0; background:#fff; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .row.one { grid-template-columns: 1fr; }
+    label { font-weight:800; font-size:.95rem; }
+    input, select, button { width:100%; font-size:16px; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; color:#000; }
+    input[type="checkbox"]{ width:auto; }
+
+    .seg { display:flex; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+    .seg button { border:0; padding:10px 12px; background:#fff; font-weight:700; }
+    .seg button.active { background:#000; color:#fff; }
+
+    .kpis { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px; }
+    .kpi { border:1px solid var(--line); border-radius:12px; padding:10px; text-align:center; }
+    .kpi .val { font-size:1.4rem; font-weight:800; }
+    .kpi .lbl { font-size:.85rem; color:#555; }
+
+    .actions { display:flex; gap:8px; margin-top:8px; }
+
+    .footer { position: fixed; left:0; right:0; bottom:0; background:#fff; border-top:1px solid var(--line); padding:10px 12px; display:flex; gap:10px; align-items:center; }
+    .footer .sum { display:flex; gap:12px; font-weight:800; }
+    .fab { margin-left:auto; border:1px solid var(--line); border-radius:999px; padding:12px 16px; background:#fff; font-weight:900; }
+
+    @media (min-width: 760px){ .row { grid-template-columns: 1fr 1fr 1fr; } .kpis { grid-template-columns: repeat(4,1fr); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>FC 26 Max‑Bid · Flipa‑sheets eins og í Excel</h1>
+    <p class="sub">Einn leikmaður = eitt "sheet". Flýti‑flipar (tabs) efst. 5% skattur meðtalin. Geymir sjálfkrafa.</p>
+
+    <div class="tabs">
+      <div id="tabbar" class="tabbar"></div>
+      <div class="tabbtns">
+        <button class="btn" id="addSheet">+ Nýtt sheet (nýr leikmaður)</button>
+        <button class="btn" id="dupSheet">Tvöfalda þetta sheet</button>
+        <button class="btn" id="delSheet">Eyða þessu sheet</button>
+      </div>
+    </div>
+
+    <div id="sheet"></div>
+
+    <div class="footer">
+      <div class="sum">
+        <span id="sCount">0 sheets</span>
+        <span>·</span>
+        <span>Samanlagður min. hagnaður: <span id="sProfit">0</span></span>
+      </div>
+      <button class="fab" id="addSheetBottom">+ Nýtt sheet</button>
+    </div>
+  </div>
+
+<script>
+const $ = (sel, el=document)=> el.querySelector(sel);
+const clampInt = n => Number.isFinite(+n) ? Math.max(0, Math.floor(+n)) : 0;
+const stepRoundDown = (n, step)=> { step = +step||1; if(step<=0) return Math.floor(n); return Math.floor(n/step)*step; };
+const fmt = n => Number(n||0).toLocaleString('is-IS');
+function escapeHtml(s){
+  return String(s ?? '').replace(/[&<>\"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;', \"'\":'&#39;' }[c]));
+}
+function opt(v, txt, sel){ return `<option value=\"${v}\" ${sel===v?'selected':''}>${txt}</option>`; }
+
+const LS_SHEETS = 'fc26_tabs_sheets_v1';
+let sheets = loadSheets();
+let activeId = sheets[0]?.id || null;
+
+function loadSheets(){
+  const raw = localStorage.getItem(LS_SHEETS);
+  if(raw){
+    try { const arr = JSON.parse(raw); if(Array.isArray(arr) && arr.length) return arr; } catch(e){}
+  }
+  const first = [{ id: uid(), name: 'Sheet 1', row: makeRow() }];
+  localStorage.setItem(LS_SHEETS, JSON.stringify(first));
+  return first;
+}
+function saveSheets(){ localStorage.setItem(LS_SHEETS, JSON.stringify(sheets)); }
+function uid(){ return Math.random().toString(36).slice(2,9); }
+
+function makeRow(){
+  return { name:'', bin:0, undercut:'0', undercutCustom:0, mode:'auto', safetyOn:false, safety:0, profitC:600, profitP:4, roundStep:50, sold:false };
+}
+function calc(r){
+  const BIN = clampInt(r.bin);
+  const uc = r.undercut==='custom' ? clampInt(r.undercutCustom) : clampInt(r.undercut);
+  const sale = Math.max(0, BIN - uc);
+  const tax = clampInt(Math.round(sale*0.05));
+  let rawMax = 0;
+  if(r.mode==='auto'){
+    const saf = r.safetyOn ? clampInt(r.safety) : Math.max(200, Math.round(BIN*0.01));
+    rawMax = Math.max(0, sale - tax - saf);
+  } else if(r.mode==='profitc'){
+    rawMax = Math.max(0, sale - tax - clampInt(r.profitC));
+  } else {
+    const p = Math.max(0, +r.profitP||0)/100;
+    rawMax = Math.max(0, (0.95 - p) * sale);
+  }
+  const bid = r.roundStep>0 ? stepRoundDown(rawMax, r.roundStep) : clampInt(rawMax);
+  const minP = Math.max(0, sale - tax - bid);
+  return { sale, tax, bid, minP };
+}
+
+function renderTabs(){
+  const bar = $('#tabbar'); bar.innerHTML = '';
+  sheets.forEach((sh, idx)=>{
+    const btn = document.createElement('button');
+    btn.className = 'tab'+(sh.id===activeId?' active':'');
+    const nm = (sh.row?.name||'').trim() || sh.name || `Sheet ${idx+1}`;
+    const sold = sh.row?.sold ? ' · selt' : '';
+    btn.innerHTML = `${escapeHtml(nm)}<small>${sold}</small>`;
+    btn.addEventListener('click', ()=>{ activeId = sh.id; renderAll(); });
+    bar.appendChild(btn);
+  });
+}
+
+function renderSheet(){
+  const host = $('#sheet');
+  const sh = sheets.find(s=>s.id===activeId) || sheets[0];
+  if(!sh) return; activeId = sh.id;
+  const r = sh.row;
+  const {sale, tax, bid, minP} = calc(r);
+  host.innerHTML = `
+    <div class="card" data-id="${sh.id}">
+      <div class="row one">
+        <div>
+          <label>Leikmaður (heiti flips)</label>
+          <input class="name" type="text" placeholder="t.d. Lukaku (Shadow)" value="${escapeHtml(r.name)}" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>BIN</label>
+          <input class="bin" type="number" min="0" step="50" value="${r.bin}" />
+        </div>
+        <div>
+          <label>Undirboð</label>
+          <select class="undercut">
+            ${opt('0','BIN (0)',r.undercut)}${opt('50','BIN − 50',r.undercut)}${opt('100','BIN − 100',r.undercut)}${opt('custom','Sérsniðið…',r.undercut)}
+          </select>
+          <input class="undercutCustom" type="number" min="0" step="50" value="${r.undercutCustom}" style="margin-top:6px; ${r.undercut==='custom'?'':'display:none'}" />
+        </div>
+      </div>
+
+      <div class="row one">
+        <label>Hamur</label>
+        <div class="seg">
+          <button type="button" class="segbtn seg-auto ${r.mode==='auto'?'active':''}">Einn inntak</button>
+          <button type="button" class="segbtn seg-kr ${r.mode==='profitc'?'active':''}">Hagnaður (kr.)</button>
+          <button type="button" class="segbtn seg-pr ${r.mode==='profitp'?'active':''}">% Hagnaður</button>
+        </div>
+      </div>
+
+      <div class="row" id="modeBox">
+        <div ${r.mode==='auto'?'':'style="display:none"'}>
+          <label><input class="safetyOn" type="checkbox" ${r.safetyOn?'checked':''}/> Sérsniðið öryggi</label>
+          <input class="safety" type="number" min="0" step="50" value="${r.safety}" style="margin-top:6px; ${r.safetyOn?'':'display:none'}" />
+          <div class="small">Sjálfgefið: max(200, 1% af BIN)</div>
+        </div>
+        <div ${r.mode==='profitc'?'':'style="display:none"'}>
+          <label>Markhagnaður (kr.)</label>
+          <input class="profitC" type="number" min="0" step="50" value="${r.profitC}" />
+        </div>
+        <div ${r.mode==='profitp'?'':'style="display:none"'}>
+          <label>Markhagnaður (%)</label>
+          <input class="profitP" type="number" min="0" step="0.1" value="${r.profitP}" />
+        </div>
+      </div>
+
+      <details style="margin-top:8px;">
+        <summary>Fleiri stillingar</summary>
+        <div class="row one" style="margin-top:8px;">
+          <div>
+            <label>Rúnun</label>
+            <select class="round">
+              ${opt('50','50',String(r.roundStep))}${opt('100','100',String(r.roundStep))}${opt('0','Engin',String(r.roundStep))}
+            </select>
+          </div>
+        </div>
+      </details>
+
+      <div class="kpis">
+        <div class="kpi"><div class="lbl">Hámarksboð</div><div class="val maxBid">${fmt(bid)}</div></div>
+        <div class="kpi"><div class="lbl">Min. hagnaður</div><div class="val minProfit">${fmt(minP)}</div></div>
+        <div class="kpi"><div class="lbl">Sölusumma</div><div class="val sell">${fmt(sale)}</div></div>
+        <div class="kpi"><div class="lbl">Skattur (5%)</div><div class="val tax">${fmt(tax)}</div></div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="btn mark">${r.sold?'Afmerkja „selt“':'Merkja „selt“'}</button>
+        <button type="button" class="btn dupSheet">Tvöfalda sem nýtt sheet</button>
+        <button type="button" class="btn delSheet">Eyða þessu sheeti</button>
+      </div>
+    </div>`;
+
+  const root = host.firstElementChild;
+  root.addEventListener('input', e=>{
+    const t = e.target; const sh = sheets.find(s=>s.id===activeId); if(!sh) return; const r = sh.row;
+    if(t.classList.contains('name')){ r.name = t.value; sh.name = r.name||sh.name; saveSheets(); renderTabs(); }
+    if(t.classList.contains('bin')) r.bin = +t.value||0;
+    if(t.classList.contains('undercut')){ r.undercut = t.value; root.querySelector('.undercutCustom').style.display = (t.value==='custom')?'':'none'; }
+    if(t.classList.contains('undercutCustom')) r.undercutCustom = +t.value||0;
+    if(t.classList.contains('safety')) r.safety = +t.value||0;
+    if(t.classList.contains('profitC')) r.profitC = +t.value||0;
+    if(t.classList.contains('profitP')) r.profitP = +t.value||0;
+    if(t.classList.contains('round')) r.roundStep = +t.value||50;
+    saveSheets(); updateCardUI(root, r); updateSummary();
+  });
+
+  root.addEventListener('click', e=>{
+    const t = e.target; const sh = sheets.find(s=>s.id===activeId); if(!sh) return; const r = sh.row;
+    if(t.classList.contains('segbtn')){
+      root.querySelectorAll('.segbtn').forEach(b=>b.classList.remove('active'));
+      t.classList.add('active');
+      if(t.classList.contains('seg-auto')) r.mode='auto';
+      if(t.classList.contains('seg-kr')) r.mode='profitc';
+      if(t.classList.contains('seg-pr')) r.mode='profitp';
+      root.querySelectorAll('#modeBox > div').forEach((d,i)=> d.style.display = ['auto','profitc','profitp'][i]===r.mode?'':'none');
+      saveSheets(); updateCardUI(root, r); return;
+    }
+    if(t.classList.contains('safetyOn')){
+      r.safetyOn = t.checked; root.querySelector('.safety').style.display = r.safetyOn ? '' : 'none'; saveSheets(); updateCardUI(root, r); return;
+    }
+    if(t.classList.contains('mark')){ r.sold=!r.sold; saveSheets(); updateCardUI(root, r); renderTabs(); updateSummary(); return; }
+    if(t.classList.contains('dupSheet')){ duplicateActiveSheet(); return; }
+    if(t.classList.contains('delSheet')){ deleteActiveSheet(); return; }
+  });
+}
+
+function updateCardUI(root, r){
+  const {sale, tax, bid, minP} = calc(r);
+  root.querySelector('.maxBid').textContent = fmt(bid);
+  root.querySelector('.minProfit').textContent = fmt(minP);
+  root.querySelector('.sell').textContent = fmt(sale);
+  root.querySelector('.tax').textContent = fmt(tax);
+  root.style.opacity = r.sold? .6 : 1;
+  root.style.textDecoration = r.sold? 'line-through' : 'none';
+}
+
+function updateSummary(){
+  const active = sheets.filter(s=>!s.row?.sold);
+  let profit = 0; active.forEach(s=>{ profit += calc(s.row).minP; });
+  $('#sCount').textContent = `${sheets.length} sheets`;
+  $('#sProfit').textContent = fmt(profit);
+}
+
+function addNewSheet(){
+  const sh = { id: uid(), name: `Sheet ${sheets.length+1}`, row: makeRow() };
+  sheets.push(sh); activeId = sh.id; saveSheets(); renderAll();
+}
+function duplicateActiveSheet(){
+  const src = sheets.find(s=>s.id===activeId); if(!src) return;
+  const copy = JSON.parse(JSON.stringify(src)); copy.id = uid(); copy.name = (copy.row?.name||src.name||'Sheet') + ' (copy)';
+  sheets.splice(sheets.indexOf(src)+1, 0, copy); activeId = copy.id; saveSheets(); renderAll();
+}
+function deleteActiveSheet(){
+  if(sheets.length<=1){ alert('Get ekki eytt síðasta sheetinu.'); return; }
+  const idx = sheets.findIndex(s=>s.id===activeId); if(idx<0) return;
+  sheets.splice(idx,1); activeId = sheets[Math.max(0, idx-1)].id; saveSheets(); renderAll();
+}
+
+function renderAll(){ renderTabs(); renderSheet(); updateSummary(); }
+
+document.addEventListener('DOMContentLoaded', renderAll);
+document.getElementById('addSheet').addEventListener('click', addNewSheet);
+document.getElementById('addSheetBottom').addEventListener('click', addNewSheet);
+document.getElementById('dupSheet').addEventListener('click', duplicateActiveSheet);
+document.getElementById('delSheet').addEventListener('click', deleteActiveSheet);
+</script>
+</body>
+</html>
